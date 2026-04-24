@@ -7,7 +7,8 @@ namespace WebApi.Controllers;
 [Route("api/rooms")]
 public class RoomsController : ControllerBase
 {
-    private static IList<Room> _rooms = new List<Room>();
+    private static IList<Room> _rooms = InMemoryDataStore.Rooms;
+    private static IList<Reservation> _reservations = InMemoryDataStore.Reservations;
     [HttpGet]
     public IActionResult GetOpis()
     {
@@ -47,8 +48,16 @@ public class RoomsController : ControllerBase
     [HttpPost]
     public IActionResult PostOpis([FromBody] Room room)
     {
-        _rooms.Add(
-            new Room(
+        try
+        {
+            ValidateRoomInputs(room);
+        }
+        catch(ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        
+        var createdRoom = new Room(
                 room.Id,
                 room.Name,
                 room.BuildingCode,
@@ -56,16 +65,29 @@ public class RoomsController : ControllerBase
                 room.Capacity,
                 room.HasProjector,
                 room.IsActive
-            ));
-           return Ok(room);
+            );
+
+        _rooms.Add(createdRoom);
+        return CreatedAtAction(nameof(PostOpis), new { id = createdRoom.Id }, createdRoom);
     }
 
     [HttpPut("{id}")]
     public IActionResult PutOpis(int id, [FromBody] Room room)
     {
+        try
+        {
+            ValidateRoomInputs(room);
+        }
+        catch(ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
         var roomById =  _rooms.FirstOrDefault(x => x.Id == id);
         if (roomById == null)
             return NotFound();
+
+        room.Id = id;
         
         _rooms.Remove(roomById);
         _rooms.Add(room);
@@ -79,9 +101,28 @@ public class RoomsController : ControllerBase
         var roomToDelete = _rooms.FirstOrDefault(x => x.Id == id);
         if (roomToDelete == null)
             return NotFound();
+
+        var hasLinkedReservations = _reservations.Any(x => x.RoomId == id);
+        if (hasLinkedReservations)
+            return Conflict("Cannot delete room with existing reservations.");
         
         _rooms.Remove(roomToDelete);
-        return Ok();
+        return NoContent();
     }
-    
+
+
+    private void ValidateRoomInputs(Room room)
+    {
+        if (room == null)
+            throw new ArgumentNullException(nameof(room));
+        
+        if(string.IsNullOrWhiteSpace(room.Name))
+            throw new ArgumentException("Room name cannot be empty.");
+            
+        if(string.IsNullOrWhiteSpace(room.BuildingCode))
+            throw new ArgumentException("Building code cannot be empty.");
+     
+        if(room.Capacity <= 0)
+            throw new ArgumentException("Capacity cannot be less than 0.");
+    }
 }
